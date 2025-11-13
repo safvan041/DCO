@@ -8,7 +8,7 @@ write_to = "src/dco/_version.py"
 
 [project]
 name = "dco"
-version = "0.0.1"
+version = "0.0.3"
 description = "Dynamic Config Orchestrator - layered typed configuration loader"
 authors = [{name = "Safwan Bakkar", email = "safwanbakkar.dev@hotmail.com"}]
 readme = "README.md"
