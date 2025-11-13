@@ -1,0 +1,7 @@
+{
+  "properties": {
+    "a": { "type": "string" },
+    "b": { "type": "integer" }
+  },
+  "required": ["a"]
+}

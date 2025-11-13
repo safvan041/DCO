@@ -13,11 +13,17 @@ from pydantic import BaseModel, ValidationError
 
 from .core import ConfigLoader
 from .secrets import NoopSecretsProvider
-from .utils import model_schema, model_to_mapping, scaffold_from_model
+from .utils import (
+    compare_schemas,
+    model_schema,
+    model_to_mapping,
+    scaffold_from_model,
+    schema_to_markdown,
+)
 from .watcher import start_watcher
 
 
-# loader helper (unchanged)
+# loader helper unchanged
 def _load_model_from_path(module_path: str):
     if ":" not in module_path:
         raise ValueError(
@@ -46,7 +52,6 @@ def _load_model_from_path(module_path: str):
                 raise TypeError("Provided class is not a pydantic BaseModel subclass.")
             return cls
 
-        # fallback to file load
         candidate_paths = []
         if mod_path.endswith(".py"):
             candidate_paths.append(Path(mod_path))
@@ -90,7 +95,7 @@ def _load_model_from_path(module_path: str):
                 pass
 
 
-# ---------- commands ----------
+# existing commands kept (dump, validate, watch, schema, scaffold, validate-file)
 def dump_command(args):
     Model = _load_model_from_path(args.model)
     loader = ConfigLoader(
@@ -161,7 +166,6 @@ def schema_command(args):
         print(json.dumps(schema, indent=2, ensure_ascii=False))
 
 
-# ---------- scaffold (already present) ----------
 def scaffold_command(args):
     Model = _load_model_from_path(args.model)
     try:
@@ -173,7 +177,7 @@ def scaffold_command(args):
     out_format = args.format or "json"
     if out_format == "yaml":
         try:
-            import yaml  # type: ignore
+            import yaml
         except ImportError:
             print("PyYAML not installed; install PyYAML to output YAML.")
             raise SystemExit(3)
@@ -188,18 +192,16 @@ def scaffold_command(args):
         print(rendered)
 
 
-# ---------- NEW: validate-file command ----------
 def _load_config_file(path: str) -> Dict[str, Any]:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(path)
     text = p.read_text(encoding="utf-8")
-    # try JSON first, then YAML
     try:
         return json.loads(text)
     except Exception:
         try:
-            import yaml  # type: ignore
+            import yaml
         except ImportError:
             raise RuntimeError(
                 "Could not parse config file as JSON and PyYAML not installed to parse YAML."
@@ -214,9 +216,6 @@ def _load_config_file(path: str) -> Dict[str, Any]:
 
 
 def validate_file_command(args):
-    """
-    Validate an explicit config file against the Pydantic model's JSON Schema using jsonschema.
-    """
     Model = _load_model_from_path(args.model)
     try:
         schema = model_schema(Model)
@@ -224,7 +223,6 @@ def validate_file_command(args):
         print("Failed to generate schema for model:", e)
         raise SystemExit(2)
 
-    # load config file
     try:
         cfg = _load_config_file(args.config_file)
     except FileNotFoundError:
@@ -234,7 +232,6 @@ def validate_file_command(args):
         print(e)
         raise SystemExit(2)
 
-    # validate using jsonschema
     try:
         import jsonschema
     except Exception:
@@ -244,17 +241,14 @@ def validate_file_command(args):
         raise SystemExit(3)
 
     try:
-        # jsonschema.validate will raise ValidationError on failure
         jsonschema.validate(instance=cfg, schema=schema)
     except jsonschema.ValidationError as e:
         print("CONFIG VALIDATION FAILED:")
         print(e.message)
-        # print path to failing element if available
         if e.path:
             print("Path:", ".".join(map(str, list(e.path))))
         if e.schema_path:
             print("Schema Path:", ".".join(map(str, list(e.schema_path))))
-        # print full error for debugging
         print("\nFull error:\n", e)
         raise SystemExit(2)
     except Exception as e:
@@ -262,6 +256,79 @@ def validate_file_command(args):
         raise SystemExit(2)
 
     print("Config file valid against model schema.")
+
+
+# ---------- NEW: schema-diff command ----------
+def _load_schema_file(path: str) -> Dict[str, Any]:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(path)
+    text = p.read_text(encoding="utf-8")
+    try:
+        return json.loads(text)
+    except Exception:
+        try:
+            import yaml
+        except ImportError:
+            raise RuntimeError(
+                "Could not parse schema file as JSON and PyYAML not installed to parse YAML."
+            )
+        try:
+            data = yaml.safe_load(text)
+            if data is None:
+                return {}
+            return data
+        except Exception as e:
+            raise RuntimeError(f"Failed to parse schema file {path}: {e}") from e
+
+
+def schema_diff_command(args):
+    try:
+        old = _load_schema_file(args.old)
+        new = _load_schema_file(args.new)
+    except FileNotFoundError as e:
+        print("Schema file not found:", e)
+        raise SystemExit(2)
+    except RuntimeError as e:
+        print(e)
+        raise SystemExit(2)
+
+    result = compare_schemas(old, new)
+    breaking = result.get("breaking", [])
+    non_breaking = result.get("non_breaking", [])
+
+    if not breaking and not non_breaking:
+        print("No differences detected.")
+        return
+
+    if non_breaking:
+        print("Non-breaking changes:")
+        for x in non_breaking:
+            print("  -", x)
+    if breaking:
+        print("\nBREAKING changes:")
+        for x in breaking:
+            print("  -", x)
+
+    # exit non-zero if there are breaking changes so CI can fail
+    if breaking:
+        raise SystemExit(2)
+
+
+def docs_command(args):
+    Model = _load_model_from_path(args.model)
+    try:
+        schema = model_schema(Model)
+    except Exception as e:
+        print("Failed to generate schema:", e)
+        raise SystemExit(2)
+
+    md = schema_to_markdown(schema, title=args.title or None)
+    if args.out:
+        Path(args.out).write_text(md, encoding="utf-8")
+        print(f"Wrote docs to {args.out}")
+    else:
+        print(md)
 
 
 def main(argv=None):
@@ -315,6 +382,21 @@ def main(argv=None):
         "--out", help="optional output file path (writes file instead of stdout)"
     )
     scaffold.set_defaults(func=scaffold_command)
+
+    schema_diff = sub.add_parser(
+        "schema-diff", help="compare two schema files and detect breaking changes"
+    )
+    schema_diff.add_argument("old", help="path to old schema (json or yaml)")
+    schema_diff.add_argument("new", help="path to new schema (json or yaml)")
+    schema_diff.set_defaults(func=schema_diff_command)
+
+    docs = sub.add_parser("docs", help="generate Markdown docs from model schema")
+    docs.add_argument("model", help="module:ModelName (pydantic BaseModel)")
+    docs.add_argument(
+        "--out", help="optional output file path (writes file instead of stdout)"
+    )
+    docs.add_argument("--title", help="optional document title")
+    docs.set_defaults(func=docs_command)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
