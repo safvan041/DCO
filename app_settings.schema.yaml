@@ -1,0 +1,45 @@
+$defs:
+  DBConfig:
+    properties:
+      host:
+        title: Host
+        type: string
+      port:
+        default: 5432
+        title: Port
+        type: integer
+      username:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Username
+      password:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Password
+    required:
+    - host
+    title: DBConfig
+    type: object
+properties:
+  debug:
+    default: false
+    title: Debug
+    type: boolean
+  environment:
+    default: development
+    title: Environment
+    type: string
+  sample_value:
+    default: hello
+    title: Sample Value
+    type: string
+  db:
+    $ref: '#/$defs/DBConfig'
+required:
+- db
+title: AppSettings
+type: object

@@ -1,0 +1,5 @@
+# examples/simple_app/config/config.development.yaml
+debug: true
+db:
+  port: 3301
+  username: "dev"

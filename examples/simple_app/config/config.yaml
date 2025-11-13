@@ -1,0 +1,7 @@
+# examples/simple_app/config/config.yaml
+debug: false
+sample_value: "from-defaults"
+db:
+  host: "db.default.local"
+  port: 3301
+  username: "default_user"
