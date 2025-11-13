@@ -54,3 +54,9 @@ jobs:
           pip install jsonschema
           dco schema examples.simple_app.app:AppSettings > schema.json
           jsonschema -i examples/simple_app/config/config.yaml schema.json
+
+      - name: Test schema-diff command
+        run: dco schema-diff new.json old.json
+
+      - name: Test docs generation command
+        run: dco docs examples.simple_app.app:AppSettings > /tmp/docs.md && test -s /tmp/docs.md
