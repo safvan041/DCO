@@ -40,6 +40,15 @@ jobs:
       - name: Validate example config
         run: dco --config-dir examples/simple_app/config validate examples.simple_app.app:AppSettings
 
+      - name: Test scaffold command (JSON)
+        run: dco scaffold examples.simple_app.app:AppSettings --format json > /tmp/scaffold.json && test -s /tmp/scaffold.json
+
+      - name: Test scaffold command (YAML)
+        run: dco scaffold examples.simple_app.app:AppSettings --format yaml > /tmp/scaffold.yaml && test -s /tmp/scaffold.yaml
+
+      - name: Test validate-file command
+        run: dco validate-file examples.simple_app.app:AppSettings examples/simple_app/config/config.yaml
+
       - name: Validate config against JSON Schema
         run: |
           pip install jsonschema

@@ -7,34 +7,24 @@ import sys
 import time
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from typing import Any, Dict
 
 from pydantic import BaseModel, ValidationError
 
 from .core import ConfigLoader
 from .secrets import NoopSecretsProvider
-from .utils import model_schema, model_to_mapping
+from .utils import model_schema, model_to_mapping, scaffold_from_model
 from .watcher import start_watcher
 
 
-# NOTE: _load_model_from_path is unchanged — supports module:Class and file paths
+# loader helper (unchanged)
 def _load_model_from_path(module_path: str):
-    """
-    Accepts:
-      - module:ClassName  e.g. examples.simple_app.app:AppSettings
-      - filesystem path: ./examples/simple_app/app.py:AppSettings or examples/simple_app/app.py:AppSettings
-
-    Tries:
-      1. importlib.import_module on the module portion (temporarily inserting cwd into sys.path)
-      2. fallback: load module from filesystem path via importlib.util.spec_from_file_location
-    """
     if ":" not in module_path:
         raise ValueError(
             "Model must be specified as module:ModelName (e.g. examples.simple_app.app:AppSettings)"
         )
 
     mod_path, cls_name = module_path.split(":", 1)
-
-    # First attempt: try a normal import. Ensure cwd is on sys.path so local directories are discoverable.
     cwd = os.getcwd()
     inserted = False
     try:
@@ -56,7 +46,7 @@ def _load_model_from_path(module_path: str):
                 raise TypeError("Provided class is not a pydantic BaseModel subclass.")
             return cls
 
-        # Second attempt: treat mod_path as a filesystem path (with or without .py)
+        # fallback to file load
         candidate_paths = []
         if mod_path.endswith(".py"):
             candidate_paths.append(Path(mod_path))
@@ -77,7 +67,6 @@ def _load_model_from_path(module_path: str):
                 f"Could not import module '{mod_path}' and no file found among candidates: {candidate_paths}"
             )
 
-        # load module from file
         spec = spec_from_file_location(found.stem, str(found))
         if spec is None or spec.loader is None:
             raise ImportError(f"Failed to create module spec for file: {found}")
@@ -101,7 +90,7 @@ def _load_model_from_path(module_path: str):
                 pass
 
 
-# ---------- existing commands ----------
+# ---------- commands ----------
 def dump_command(args):
     Model = _load_model_from_path(args.model)
     loader = ConfigLoader(
@@ -112,7 +101,6 @@ def dump_command(args):
     except ValidationError as e:
         print("Validation failed:\n", e)
         raise SystemExit(2)
-    # print merged as JSON using model_to_mapping for pydantic v1/v2 compatibility
     print(json.dumps(model_to_mapping(cfg), indent=2, ensure_ascii=False))
 
 
@@ -137,7 +125,6 @@ def watch_command(args):
     get_settings = loader.get_cached_loader()
 
     def on_change(path):
-        # clear cache and reload
         get_settings.cache_clear()
         try:
             s = get_settings()
@@ -155,11 +142,7 @@ def watch_command(args):
         print("Stopped.")
 
 
-# ---------- new schema command ----------
 def schema_command(args):
-    """
-    Output JSON Schema for the provided Pydantic model class.
-    """
     Model = _load_model_from_path(args.model)
     try:
         schema = model_schema(Model)
@@ -169,13 +152,116 @@ def schema_command(args):
 
     if args.format == "yaml":
         try:
-            import yaml
+            import yaml  # type: ignore
         except ImportError:
             print("PyYAML not installed; install PyYAML to output YAML.")
             raise SystemExit(3)
         print(yaml.safe_dump(schema, sort_keys=False))
     else:
         print(json.dumps(schema, indent=2, ensure_ascii=False))
+
+
+# ---------- scaffold (already present) ----------
+def scaffold_command(args):
+    Model = _load_model_from_path(args.model)
+    try:
+        scaffold = scaffold_from_model(Model)
+    except Exception as e:
+        print("Failed to generate scaffold:", e)
+        raise SystemExit(2)
+
+    out_format = args.format or "json"
+    if out_format == "yaml":
+        try:
+            import yaml  # type: ignore
+        except ImportError:
+            print("PyYAML not installed; install PyYAML to output YAML.")
+            raise SystemExit(3)
+        rendered = yaml.safe_dump(scaffold, sort_keys=False)
+    else:
+        rendered = json.dumps(scaffold, indent=2, ensure_ascii=False)
+
+    if args.out:
+        Path(args.out).write_text(rendered, encoding="utf-8")
+        print(f"Wrote scaffold to {args.out}")
+    else:
+        print(rendered)
+
+
+# ---------- NEW: validate-file command ----------
+def _load_config_file(path: str) -> Dict[str, Any]:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(path)
+    text = p.read_text(encoding="utf-8")
+    # try JSON first, then YAML
+    try:
+        return json.loads(text)
+    except Exception:
+        try:
+            import yaml  # type: ignore
+        except ImportError:
+            raise RuntimeError(
+                "Could not parse config file as JSON and PyYAML not installed to parse YAML."
+            )
+        try:
+            data = yaml.safe_load(text)
+            if data is None:
+                return {}
+            return data
+        except Exception as e:
+            raise RuntimeError(f"Failed to parse config file {path}: {e}") from e
+
+
+def validate_file_command(args):
+    """
+    Validate an explicit config file against the Pydantic model's JSON Schema using jsonschema.
+    """
+    Model = _load_model_from_path(args.model)
+    try:
+        schema = model_schema(Model)
+    except Exception as e:
+        print("Failed to generate schema for model:", e)
+        raise SystemExit(2)
+
+    # load config file
+    try:
+        cfg = _load_config_file(args.config_file)
+    except FileNotFoundError:
+        print(f"Config file not found: {args.config_file}")
+        raise SystemExit(2)
+    except RuntimeError as e:
+        print(e)
+        raise SystemExit(2)
+
+    # validate using jsonschema
+    try:
+        import jsonschema
+    except Exception:
+        print(
+            "jsonschema not installed. Install with `pip install jsonschema` to use validate-file."
+        )
+        raise SystemExit(3)
+
+    try:
+        # jsonschema.validate will raise ValidationError on failure
+        jsonschema.validate(instance=cfg, schema=schema)
+    except jsonschema.ValidationError as e:
+        print("CONFIG VALIDATION FAILED:")
+        print(e.message)
+        # print path to failing element if available
+        if e.path:
+            print("Path:", ".".join(map(str, list(e.path))))
+        if e.schema_path:
+            print("Schema Path:", ".".join(map(str, list(e.schema_path))))
+        # print full error for debugging
+        print("\nFull error:\n", e)
+        raise SystemExit(2)
+    except Exception as e:
+        print("Unexpected validation error:", e)
+        raise SystemExit(2)
+
+    print("Config file valid against model schema.")
 
 
 def main(argv=None):
@@ -187,9 +273,21 @@ def main(argv=None):
     dump.add_argument("model", help="module:ModelName (pydantic BaseModel)")
     dump.set_defaults(func=dump_command)
 
-    validate = sub.add_parser("validate", help="validate config")
+    validate = sub.add_parser(
+        "validate", help="validate config (using loader merge semantics)"
+    )
     validate.add_argument("model", help="module:ModelName (pydantic BaseModel)")
     validate.set_defaults(func=validate_command)
+
+    validate_file = sub.add_parser(
+        "validate-file",
+        help="validate an explicit config file against the model schema (json/yaml)",
+    )
+    validate_file.add_argument("model", help="module:ModelName (pydantic BaseModel)")
+    validate_file.add_argument(
+        "config_file", help="path to JSON or YAML config file to validate"
+    )
+    validate_file.set_defaults(func=validate_file_command)
 
     watch = sub.add_parser(
         "watch", help="watch config directory and print reloads (dev only)"
@@ -205,6 +303,18 @@ def main(argv=None):
         "--format", choices=("json", "yaml"), default="json", help="output format"
     )
     schema.set_defaults(func=schema_command)
+
+    scaffold = sub.add_parser(
+        "scaffold", help="scaffold a config template from model schema"
+    )
+    scaffold.add_argument("model", help="module:ModelName (pydantic BaseModel)")
+    scaffold.add_argument(
+        "--format", choices=("json", "yaml"), default="json", help="output format"
+    )
+    scaffold.add_argument(
+        "--out", help="optional output file path (writes file instead of stdout)"
+    )
+    scaffold.set_defaults(func=scaffold_command)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):

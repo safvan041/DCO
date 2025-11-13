@@ -17,6 +17,8 @@ dependencies = [
     "PyYAML>=6.0",
     "watchdog>=3.0",
     "boto3>=1.26",
+    "jsonschema>=4.0",
+    "types-PyYAML>=6.0",
 ]
 
 [project.scripts]
@@ -30,4 +32,6 @@ profile = "black"
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
 extend-ignore = ["E203"]  # if you want to suppress specific rules

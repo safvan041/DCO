@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
-import yaml
+import yaml  # type: ignore
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
