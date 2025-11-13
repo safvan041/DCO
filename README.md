@@ -1,203 +1,245 @@
+✅ DCO – Dynamic Config Orchestrator
 
-# DCO — Dynamic Config Orchestrator
+Zero-hardcoded configs. Automatic merging. Schema-driven validation. Secrets integration. Developer-friendly.
 
-DCO is a small, opinionated toolbox to load, validate and document typed configuration for Python services.
+DCO is a Python package designed to eliminate hardcoded configuration from backend applications by providing:
 
-This manual explains how to install and use DCO locally and in CI, describes the CLI commands, configuration layout, and best practices for secure use.
+Dynamic config loading
 
-**Quick goals:**
-- **Typed config** using Pydantic models
-- **Layered loading** (files, environment, .env, secrets, env vars)
-- **Schema export, scaffold & docs** generation from Pydantic models
-- **Small CLI** for validation, inspection and developer tooling
+Automatic merging across environments
 
-**Supported Python versions:** 3.10, 3.11, 3.12
+Env var + .env + YAML/JSON support
 
-**Table of contents**
-- Installation
-- Configuration layout
-- CLI reference and examples
-- Generating docs & schema
-- CI and packaging
-- Security & secrets handling
-- Contributing
+Secrets provider abstraction (AWS, Vault, custom)
 
-**Installation**
+JSON Schema generation
 
-- From source (developer):
+Config scaffolding
 
-```bash
-git clone <repo-url>
-cd DCO
-pip install -e .
-```
+Schema diffing (detect breaking changes!)
 
-- As a wheel (release):
+CLI for validation, dumping, watching
 
-```bash
+Full Pydantic model integration
+
+CI-friendly commands for teams
+
+Stop maintaining messy settings.py files, duplicated YAMLs, and inconsistent environment config.
+DCO centralizes everything with a clean, predictable, and IDE-friendly workflow.
+
+✨ Features
+🚀 Dynamic Config Loading
+
+Automatically merges:
+
+config.yaml
+
+config.<env>.yaml
+
+.env
+
+environment variables (APP__DB__HOST)
+
+secret provider values
+
+Pydantic defaults
+
+🔄 Hot Reload (dev only)
+
+Watch config directory and reload settings on file change.
+
+🔐 Secrets Providers
+
+Optional built-in integrations:
+
+AWS Secrets Manager
+
+AWS SSM
+
+HashiCorp Vault
+
+or implement your own with a simple interface.
+
+🛡 JSON Schema + CI Validation
+
+Generate schema from your Pydantic model.
+Validate real config files or the merged effective config.
+
+🛠 CLI Tools
+
+dco dump – print merged config
+
+dco validate – validate merged config
+
+dco validate-file – validate a specific YAML/JSON file
+
+dco scaffold – auto-generate starter config file
+
+dco schema – export JSON/YAML schema
+
+dco schema-diff – detect breaking config changes
+
+dco watch – file watcher for dev reloading
+
+dco docs – generate Markdown docs from schema
+
+🔧 Zero Hardcoding
+
+No more:
+
+hardcoded hosts
+
+hardcoded ports
+
+duplicated YAMLs
+
+manual “dev/stage/prod” handling
+
+📦 Installation
+Stable release (after publishing to PyPI):
 pip install dco
-```
 
-Note: optional features (AWS/Vault integrations) are provided by optional dependencies — see `pyproject.toml` for extras groups if present.
+Latest GitHub version:
+pip install "git+https://github.com/safvan041/DCO.git#egg=dco"
 
-**Configuration layout**
+🚀 Quick Start
+1. Define your settings using Pydantic
+# settings.py
+from pydantic import BaseModel
+from dco import ConfigLoader
 
-DCO expects a `config` directory (or a path supplied via `--config-dir`) with layered files. Example layout:
+class DatabaseSettings(BaseModel):
+    host: str
+    port: int = 5432
 
-- `config/config.yaml` — base config
-- `config/config.development.yaml` — environment override
-- `config/.env` — dotenv file (APP_ prefixed envs are parsed to nested config)
+class AppSettings(BaseModel):
+    debug: bool = False
+    db: DatabaseSettings
 
-Environment variable precedence (high -> low):
-- explicit program overrides (when using API)
-- environment variables (prefixed, e.g. `APP_DB__HOST`)
-- secrets provider
-- `.env` file
-- `config.{env}.yaml`
-- `config.yaml`
+2. Create a config directory
+config/
+    config.yaml
+    config.development.yaml
+    .env
 
-Keys using double-underscore map to nested dictionaries (e.g. `APP_DB__HOST=host` -> `{"db": {"host": "host"}}`).
+Example config.yaml:
+debug: false
+db:
+  host: "localhost"
+  port: 5432
 
-**CLI Reference**
+Example .env:
+DB__PASSWORD=supersecret
 
-Run `dco --help` for a quick list. Below are the primary commands with examples.
+3. Load configuration in your app
+from settings import AppSettings
+from dco import ConfigLoader
 
-- `dco validate <model>`
-	- Validate the merged configuration (files + .env + env vars) against a Pydantic model.
-	- Example:
+loader = ConfigLoader(AppSettings, config_dir="config")
+settings = loader.load()
 
-```bash
-dco --config-dir examples/simple_app/config validate examples.simple_app.app:AppSettings
-```
+print(settings.debug)
+print(settings.db.host)
 
-- `dco dump <model>`
-	- Print merged configuration as JSON.
+4. Switch environments
+export DCO_ENV=development
+python app.py
 
-```bash
-dco --config-dir examples/simple_app/config dump examples.simple_app.app:AppSettings
-```
+🧰 CLI Usage
+Dump merged config
+dco --config-dir=config dump settings:AppSettings
 
-- `dco schema <model> [--format json|yaml]`
-	- Export JSON Schema for a model.
+Validate merged config
+dco --config-dir=config validate settings:AppSettings
 
-```bash
-dco schema examples.simple_app.app:AppSettings --format json > schema.json
-```
+Validate a single file
+dco validate-file settings:AppSettings config/config.yaml
 
-- `dco scaffold <model> [--format json|yaml] [--out FILE]`
-	- Generate a config template/scaffold from the model schema.
+Generate JSON Schema
+dco schema settings:AppSettings --out app.schema.json
 
-```bash
-dco scaffold examples.simple_app.app:AppSettings --format yaml --out config.template.yaml
-```
+Generate YAML Schema
+dco schema settings:AppSettings --format yaml --out app.schema.yaml
 
-- `dco validate-file <model> <config_file>`
-	- Validate an explicit JSON/YAML file against the model schema using `jsonschema`.
+Auto-generate config scaffold
+dco scaffold settings:AppSettings --format yaml --out example.config.yaml
 
-```bash
-dco validate-file examples.simple_app.app:AppSettings examples/simple_app/config/config.yaml
-```
+Detect breaking schema changes
+dco schema-diff old.schema.json new.schema.json
 
-- `dco validate-merged <model>`
-	- Convenience command: load merged config using loader semantics and validate the resulting runtime configuration against the model schema.
+Generate Markdown docs
+dco docs settings:AppSettings --out docs/app_settings.md
 
-```bash
-dco --config-dir examples.simple_app/config validate-merged examples.simple_app.app:AppSettings
-```
+Watch config for live reload (dev)
+dco watch settings:AppSettings
 
-- `dco schema-diff <old_schema> <new_schema>`
-	- Compare two schema files and report breaking/non-breaking changes (useful in PR gating).
+🔐 Secrets Providers
 
-```bash
-dco schema-diff old_schema.json new_schema.json
-```
+Configure via:
 
-- `dco docs <model> [--out FILE] [--title TITLE]`
-	- Render Markdown documentation derived from model JSON Schema.
+from dco.secrets import AwsSecretsManagerProvider
 
-```bash
-PYTHONPATH=src dco docs examples.simple_app.app:AppSettings --out docs/app_settings.md --title "AppSettings Configuration"
-```
+loader = ConfigLoader(
+    AppSettings,
+    secrets_provider=AwsSecretsManagerProvider(prefix="myapp/")
+)
+settings = loader.load()
 
-- `dco watch <model>`
-	- Watch configuration directory and print reloads (development only). Secrets are redacted in watch output.
 
-```bash
-dco --config-dir examples/simple_app/config watch examples.simple_app.app:AppSettings
-```
+Or build your own provider:
 
-**Notes on model reference**
+from dco.secrets import SecretProvider
 
-Models are referenced as `module.path:ModelName`, for example `examples.simple_app.app:AppSettings`. You may also provide a filesystem path like `./examples/simple_app/app.py:AppSettings`.
+class MyProvider(SecretProvider):
+    def get_secret(self, path: str) -> str:
+        return "value"
 
-**Examples**
+🧪 Testing
+pytest -q
 
-1. Scaffold + edit + validate:
 
-```bash
-dco scaffold examples.simple_app.app:AppSettings --format yaml > config.template.yaml
-# edit config.template.yaml to fill required fields
-dco validate-file examples.simple_app.app:AppSettings config.template.yaml
-```
+Or run example integration test:
 
-2. Generate docs in CI:
+PYTHONPATH=src python examples/simple_app/test_integration.py
 
-```bash
-PYTHONPATH=src dco docs examples.simple_app.app:AppSettings --out docs/app_settings.md --title "AppSettings"
-```
+📄 Configuration File Rules
 
-**CI & Packaging (recommendations)**
+Environment-specific files override base config
 
-- Build wheel and smoke-test in CI before publishing. Example sequence in CI:
+.env overrides YAML
 
-```bash
-python -m build --wheel --outdir dist
-pip install dist/*.whl
-python -c "import dco; print(dco.__version__)"
-```
+Env vars override .env
 
-- Use `dco schema-diff` in a gating job to prevent breaking schema changes on PRs.
+Secrets override everything
 
-**Security & Secrets Handling**
+Model defaults apply if key missing
 
-- Do NOT print secrets or write them into generated docs. Use `filter_secrets_for_logging()` to redact secrets before any printing of config content. Example:
+Type validation enforced by Pydantic
 
-```py
-from dco.utils import filter_secrets_for_logging
-mapping = model_to_mapping(settings)
-print(filter_secrets_for_logging(mapping))
-```
+Schema ensures structural correctness
 
-- Never commit real secret values to the repo. Use CI secret stores for deployment credentials.
+📚 Tips for Real Projects
 
-**Packaging metadata and extras**
+Commit your schema (JSON) to detect breaking changes in CI
 
-- Optional dependencies (e.g., AWS/Vault support) are declared in `pyproject.toml` or `setup.cfg` as extras. Install with:
+Use schema-diff in pull requests
 
-```bash
-pip install dco[aws]
-```
+Use dco scaffold to bootstrap new services
 
-**Extending & contribution**
+Use Env vars like DB__HOST to override nested settings
 
-- Tests: run `pytest` to verify functionality. New features should include unit tests and CLI integration tests.
-- Linting & hooks: the repo uses `ruff`, `black`, `isort`, and `mypy`; pre-commit hooks will run these checks.
+Use watch during development for auto-reload
 
-**Troubleshooting**
+Keep .env out of production; use secrets provider instead
 
-- "Module found twice" mypy error when running tests locally usually means `examples` must be a package — ensure `examples/__init__.py` exists.
-- If `jsonschema` yields missing stubs for mypy, install `types-PyYAML` or run `mypy --install-types --non-interactive` in developer environments.
+🤝 Contributing
 
-**Support and maintenance**
+Pull requests welcome!
+Please run:
 
-- For packaging and releases: ensure `pyproject.toml` contains correct metadata (version, classifiers, long_description) and test building a wheel in CI.
-- Add schema gating and packaging jobs in CI to keep the project safe for consumers.
+ruff check .
+black .
+pytest -q
 
----
 
-If you want, I can also:
-- add an Examples section with a step-by-step guide for `examples/simple_app`,
-- create a `CONTRIBUTING.md` with commit and release workflows, or
-- add a `Makefile` or `scripts/` helpers to automate docs and packaging tasks.
-
-Happy to proceed with any of those next steps.
+before submitting.
