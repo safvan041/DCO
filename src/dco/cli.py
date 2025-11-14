@@ -8,6 +8,7 @@ import time
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any, Dict
+import tempfile
 
 from pydantic import BaseModel, ValidationError
 
@@ -99,7 +100,10 @@ def _load_model_from_path(module_path: str):
 def dump_command(args):
     Model = _load_model_from_path(args.model)
     loader = ConfigLoader(
-        Model, config_dir=args.config_dir, secrets_provider=NoopSecretsProvider()
+        Model,
+        config_dir=args.config_dir,
+        secrets_provider=NoopSecretsProvider(),
+        lenient_yaml=getattr(args, "lenient_yaml", False),
     )
     try:
         cfg = loader.load()
@@ -112,7 +116,10 @@ def dump_command(args):
 def validate_command(args):
     Model = _load_model_from_path(args.model)
     loader = ConfigLoader(
-        Model, config_dir=args.config_dir, secrets_provider=NoopSecretsProvider()
+        Model,
+        config_dir=args.config_dir,
+        secrets_provider=NoopSecretsProvider(),
+        lenient_yaml=getattr(args, "lenient_yaml", False),
     )
     try:
         loader.load()
@@ -125,7 +132,10 @@ def validate_command(args):
 def watch_command(args):
     Model = _load_model_from_path(args.model)
     loader = ConfigLoader(
-        Model, config_dir=args.config_dir, secrets_provider=NoopSecretsProvider()
+        Model,
+        config_dir=args.config_dir,
+        secrets_provider=NoopSecretsProvider(),
+        lenient_yaml=getattr(args, "lenient_yaml", False),
     )
     get_settings = loader.get_cached_loader()
 
@@ -330,10 +340,69 @@ def docs_command(args):
     else:
         print(md)
 
+def validate_merged_command(args):
+    """
+    Dump the merged config (using loader semantics) to a temporary file
+    and validate it against the model schema using the existing validate-file logic.
+    Exits 0 on success, 2 on validation failure.
+    """
+    # Load model and produce merged config via ConfigLoader
+    Model = _load_model_from_path(args.model)
+    loader = ConfigLoader(
+        Model,
+        config_dir=args.config_dir,
+        secrets_provider=NoopSecretsProvider(),
+        lenient_yaml=getattr(args, "lenient_yaml", False),
+    )
+    try:
+        cfg = loader.load()
+    except Exception as e:
+        print("Failed to load merged config:", e)
+        raise SystemExit(2)
+
+    # Convert Pydantic model instance to plain mapping (JSON serializable)
+    try:
+        obj = model_to_mapping(cfg)
+    except Exception:
+        # fallback - try dict
+        try:
+            obj = cfg.dict()  # for Pydantic v1 compatibility
+        except Exception as e:
+            print("Failed to convert config to mapping for validation:", e)
+            raise SystemExit(2)
+
+    # Dump to a temp JSON file and call the existing validate-file logic by reusing _load_schema_file + compare via jsonschema
+    # But to avoid duplicating parsing code, we'll write to a temp file and call the validate_file_command logic by constructing a fake args object.
+    import json
+    from types import SimpleNamespace
+    tf = None
+    try:
+        tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(obj, tf, indent=2, ensure_ascii=False)
+        tf.flush()
+        tf.close()
+        fake_args = SimpleNamespace(model=args.model, config_file=tf.name)
+        # Reuse the validate_file_command implementation defined earlier
+        validate_file_command(fake_args)
+    finally:
+        # remove temp file if exists
+        import os
+        if tf is not None and os.path.exists(tf.name):
+            try:
+                os.remove(tf.name)
+            except Exception:
+                pass
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="dco")
     parser.add_argument("--config-dir", default="config", help="path to config dir")
+    parser.add_argument(
+        "--lenient-yaml",
+        action="store_true",
+        default=False,
+        help="attempt lenient YAML parsing (sanitization) when YAML parsing fails",
+    )
     sub = parser.add_subparsers(dest="cmd")
 
     dump = sub.add_parser("dump", help="dump merged config as JSON")
@@ -397,6 +466,10 @@ def main(argv=None):
     )
     docs.add_argument("--title", help="optional document title")
     docs.set_defaults(func=docs_command)
+    validate_merged = sub.add_parser("validate-merged", help="dump merged config and validate it against the model schema")
+    validate_merged.add_argument("model", help="module:ModelName (pydantic BaseModel)")
+    validate_merged.set_defaults(func=validate_merged_command)
+
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):

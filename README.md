@@ -256,6 +256,12 @@ PYTHONPATH=src python examples/simple_app/test_integration.py
 - Use watch during development for auto-reload
 - Keep .env out of production; use secrets provider instead
 
+Lenient YAML parsing
+
+ - **Opt-in:** DCO can attempt a conservative sanitization when YAML parsing fails due to simple indentation mistakes (for example, a single accidental leading space before a top-level key). This behavior is disabled by default.
+ - **How to enable:** pass `--lenient-yaml` to CLI commands that load merged config (`dump`, `validate`, `watch`, `validate-merged`) or set `lenient_yaml=True` when constructing `ConfigLoader` in code.
+ - **Warning:** This mode can hide real config errors. Use it only for migration or development when you must accept messy legacy configs.
+
 🤝 Contributing
 
 Pull requests welcome!

@@ -7,7 +7,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
+import logging
 import yaml  # type: ignore
+from yaml.scanner import ScannerError
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
@@ -72,6 +74,29 @@ def validate_model(model_cls: Type[BaseModel], payload: Dict[str, Any]) -> BaseM
     )
 
 
+def _parse_yaml(text: str, lenient: bool = False) -> Any:
+    """
+    Parse YAML text. If `lenient` is True and a ScannerError occurs,
+    attempt a conservative sanitization (strip a single leading space
+    from lines) and re-parse. Returns the parsed object or raises the
+    original ScannerError on failure.
+    """
+    try:
+        return yaml.safe_load(text)
+    except ScannerError as e:
+        if not lenient:
+            raise
+        # Log a warning that we are attempting lenient parsing
+        logging.warning(
+            "YAML parsing failed; attempting lenient sanitization: %s", str(e)
+        )
+        sanitized = "\n".join(
+            [line[1:] if line.startswith(" ") else line for line in text.splitlines()]
+        )
+        # Try one more time; if this fails let the ScannerError propagate
+        return yaml.safe_load(sanitized)
+
+
 class ConfigLoader:
     """
     ConfigLoader handles layered config loading and validation.
@@ -97,6 +122,7 @@ class ConfigLoader:
         secrets_provider: Optional[SecretsProvider] = None,
         load_dotenv: bool = True,
         envvar_prefix: str = DEFAULT_PREFIX,
+        lenient_yaml: bool = False,
     ):
         self.model_cls = model_cls
         self.config_dir = Path(config_dir)
@@ -105,6 +131,7 @@ class ConfigLoader:
         self.secrets_provider = secrets_provider or NoopSecretsProvider()
         self.load_dotenv = load_dotenv
         self.envvar_prefix = envvar_prefix
+        self.lenient_yaml = bool(lenient_yaml)
 
     # ---------- source readers ----------
     def _read_files(self) -> Dict[str, Any]:
@@ -123,7 +150,13 @@ class ConfigLoader:
             try:
                 text = p.read_text(encoding="utf-8")
                 if p.suffix in (".yaml", ".yml"):
-                    data = yaml.safe_load(text) or {}
+                    try:
+                        data = _parse_yaml(text, lenient=self.lenient_yaml) or {}
+                    except ScannerError as e:
+                        # Preserve the original error semantics for callers
+                        # — raise a MergeError which will be handled by the
+                        # caller/CLI. Include the scanner message for clarity.
+                        raise MergeError(f"Failed reading {p}: {e}") from e
                 elif p.suffix == ".json":
                     data = json.loads(text) or {}
                 else:
