@@ -1,11 +1,10 @@
 # tests/test_lenient_yaml.py
 from pathlib import Path
-import os
+
 import pytest
 
-from dco.core import ConfigLoader, MergeError
-
 from dco.cli import _load_model_from_path
+from dco.core import ConfigLoader, MergeError
 
 AppSettings = _load_model_from_path("examples.simple_app.app:AppSettings")
 

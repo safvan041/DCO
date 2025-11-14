@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
-import logging
 import yaml  # type: ignore
-from yaml.scanner import ScannerError
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
+from yaml.scanner import ScannerError  # type: ignore[import-untyped]
 
 from .secrets import NoopSecretsProvider, SecretsProvider
 

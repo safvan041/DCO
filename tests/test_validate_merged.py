@@ -1,14 +1,12 @@
 # tests/test_validate_merged.py
-import os
 from pathlib import Path
-import json
-import sys
-import types
 
 from dco.cli import main as dco_main
 
+
 def write_file(path: Path, content: str):
     path.write_text(content, encoding="utf-8")
+
 
 def test_validate_merged_success(tmp_path, monkeypatch):
     # prepare config dir
@@ -21,9 +19,16 @@ def test_validate_merged_success(tmp_path, monkeypatch):
     # ensure env override doesn't break
     monkeypatch.setenv("DCO_ENV", "development")
     # call CLI main for validate-merged, expect no SystemExit (success)
-    argv = ["--config-dir", str(cfg), "--lenient-yaml", "validate-merged", "examples.simple_app.app:AppSettings"]
+    argv = [
+        "--config-dir",
+        str(cfg),
+        "--lenient-yaml",
+        "validate-merged",
+        "examples.simple_app.app:AppSettings",
+    ]
     # Should return normally (no SystemExit)
     dco_main(argv)
+
 
 def test_validate_merged_failure_missing_required(tmp_path, monkeypatch):
     cfg = tmp_path / "cfg"
@@ -31,7 +36,12 @@ def test_validate_merged_failure_missing_required(tmp_path, monkeypatch):
     # missing db.host in all sources -> should fail
     write_file(cfg / "config.yaml", "debug: false\n db:\n  port: 1\n")
     monkeypatch.setenv("DCO_ENV", "development")
-    argv = ["--config-dir", str(cfg), "validate-merged", "examples.simple_app.app:AppSettings"]
+    argv = [
+        "--config-dir",
+        str(cfg),
+        "validate-merged",
+        "examples.simple_app.app:AppSettings",
+    ]
     try:
         dco_main(argv)
         # if we reach here then validation didn't fail — that's an error

@@ -4,11 +4,11 @@ import importlib
 import json
 import os
 import sys
+import tempfile
 import time
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any, Dict
-import tempfile
 
 from pydantic import BaseModel, ValidationError
 
@@ -340,6 +340,7 @@ def docs_command(args):
     else:
         print(md)
 
+
 def validate_merged_command(args):
     """
     Dump the merged config (using loader semantics) to a temporary file
@@ -375,9 +376,12 @@ def validate_merged_command(args):
     # But to avoid duplicating parsing code, we'll write to a temp file and call the validate_file_command logic by constructing a fake args object.
     import json
     from types import SimpleNamespace
+
     tf = None
     try:
-        tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+        tf = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        )
         json.dump(obj, tf, indent=2, ensure_ascii=False)
         tf.flush()
         tf.close()
@@ -387,6 +391,7 @@ def validate_merged_command(args):
     finally:
         # remove temp file if exists
         import os
+
         if tf is not None and os.path.exists(tf.name):
             try:
                 os.remove(tf.name)
@@ -466,10 +471,12 @@ def main(argv=None):
     )
     docs.add_argument("--title", help="optional document title")
     docs.set_defaults(func=docs_command)
-    validate_merged = sub.add_parser("validate-merged", help="dump merged config and validate it against the model schema")
+    validate_merged = sub.add_parser(
+        "validate-merged",
+        help="dump merged config and validate it against the model schema",
+    )
     validate_merged.add_argument("model", help="module:ModelName (pydantic BaseModel)")
     validate_merged.set_defaults(func=validate_merged_command)
-
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
